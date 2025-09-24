@@ -50,12 +50,31 @@ if ! command -v pct &> /dev/null; then
     msg_error "This script must be run on a Proxmox VE host"
 fi
 
-# Get storage location
-STORAGE=$(pvesm status -content rootdir | awk 'NR>1 {print $1}' | head -n1)
-if [ -z "$STORAGE" ]; then
-    msg_error "No suitable storage found"
+# Get proper storage for templates (vztmpl) and containers (rootdir)
+msg_info "Finding suitable storage..."
+
+# Get template storage
+TEMPLATE_STORAGE=$(pvesm status -content vztmpl | awk 'NR>1 && /active/ {print $1}' | head -n1)
+if [ -z "$TEMPLATE_STORAGE" ]; then
+    TEMPLATE_STORAGE=$(pvesm status -content vztmpl | awk 'NR>1 {print $1}' | head -n1)
 fi
-msg_ok "Using storage: $STORAGE"
+
+# Get container storage
+CONTAINER_STORAGE=$(pvesm status -content rootdir | awk 'NR>1 && /active/ {print $1}' | head -n1)
+if [ -z "$CONTAINER_STORAGE" ]; then
+    CONTAINER_STORAGE=$(pvesm status -content rootdir | awk 'NR>1 {print $1}' | head -n1)
+fi
+
+if [ -z "$TEMPLATE_STORAGE" ]; then
+    msg_error "No storage found for templates. Please check your storage configuration."
+fi
+
+if [ -z "$CONTAINER_STORAGE" ]; then
+    msg_error "No storage found for containers. Please check your storage configuration."
+fi
+
+msg_ok "Template storage: $TEMPLATE_STORAGE"
+msg_ok "Container storage: $CONTAINER_STORAGE"
 
 # Update template list
 msg_info "Updating template list..."
@@ -66,7 +85,7 @@ msg_info "Checking for Debian 12 templates..."
 TEMPLATE=""
 
 # Try to find local template first
-LOCAL_TEMPLATE=$(pveam list $STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $1}' | head -n1)
+LOCAL_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $1}' | head -n1)
 if [ -n "$LOCAL_TEMPLATE" ]; then
     TEMPLATE="$LOCAL_TEMPLATE"
     msg_ok "Found local template: $TEMPLATE"
@@ -83,45 +102,48 @@ else
     fi
 
     if [ -z "$TEMPLATE_LINE" ]; then
-        # Fallback to any debian-12 template
-        TEMPLATE_LINE=$(pveam available | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | head -n1)
+        # Fallback to debian-12 core template
+        TEMPLATE_LINE=$(pveam available | grep -E "debian-12-turnkey-core.*\.tar\.(gz|zst|xz)" | head -n1)
     fi
 
     if [ -z "$TEMPLATE_LINE" ]; then
-        msg_error "No Debian 12 template found. Please download one manually using: pveam download $STORAGE <section>/<template-name>"
+        msg_info "Available templates:"
+        pveam available | grep debian-12 | head -5
+        msg_error "No suitable Debian 12 template found. Please manually download using: pveam download $TEMPLATE_STORAGE <template-name>"
     fi
 
     # Extract section and template name
     SECTION=$(echo "$TEMPLATE_LINE" | awk '{print $1}')
     TEMPLATE_NAME=$(echo "$TEMPLATE_LINE" | awk '{print $2}')
 
-    if [ "$SECTION" = "system" ]; then
-        # For system section, use the template directly
-        DOWNLOAD_NAME="$TEMPLATE_NAME"
-    else
-        # For other sections, might need section prefix
-        DOWNLOAD_NAME="$SECTION/$TEMPLATE_NAME"
-    fi
-
     msg_info "Downloading template: $TEMPLATE_NAME from section: $SECTION"
 
-    # Try download without section first (most common)
-    if ! pveam download $STORAGE "$TEMPLATE_NAME" 2>/dev/null; then
-        # If that fails, try with section prefix
-        pveam download $STORAGE "$DOWNLOAD_NAME"
+    # Download the template
+    if ! pveam download $TEMPLATE_STORAGE "$TEMPLATE_NAME" 2>/dev/null; then
+        msg_info "Trying alternative download method..."
+        # Some systems need the section prefix
+        if ! pveam download $TEMPLATE_STORAGE "$SECTION:$TEMPLATE_NAME" 2>/dev/null; then
+            # Last attempt without any prefix
+            pveam download $TEMPLATE_STORAGE "$(basename $TEMPLATE_NAME)"
+        fi
     fi
 
-    TEMPLATE="$TEMPLATE_NAME"
-    msg_ok "Template downloaded: $TEMPLATE"
+    # Verify download
+    TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $1}' | head -n1)
+    if [ -z "$TEMPLATE" ]; then
+        msg_error "Failed to download template. Please check your network and storage configuration."
+    fi
+
+    msg_ok "Template ready: $TEMPLATE"
 fi
 
 # Create container
 msg_info "Creating LXC container..."
-pct create $CTID ${STORAGE}:vztmpl/${TEMPLATE} \
+pct create $CTID ${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE} \
     --hostname $HOSTNAME \
     --cores $CPU_CORES \
     --memory $RAM_SIZE \
-    --rootfs ${STORAGE}:${DISK_SIZE} \
+    --rootfs ${CONTAINER_STORAGE}:${DISK_SIZE} \
     --net0 name=eth0,bridge=${BRIDGE},ip=dhcp \
     --features nesting=1,keyctl=1 \
     --unprivileged 1 \
