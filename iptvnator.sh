@@ -41,27 +41,58 @@ function update_script() {
 
 start
 build_container
-# NO description (evitem 404 a ${var_install}.sh)
+description
+
+function default_settings() {
+  CT_TYPE="1"
+  PW=""
+  CT_ID=$NEXTID
+  HN=$NSAPP
+  DISK_SIZE="$var_disk"
+  CORE_COUNT="$var_cpu"
+  RAM_SIZE="$var_ram"
+  BRG="vmbr0"
+  NET="dhcp"
+  GATE=""
+  APT_CACHER=""
+  APT_CACHER_IP=""
+  DISABLEIP6="no"
+  MTU=""
+  SD=""
+  NS=""
+  MAC=""
+  VLAN=""
+  SSH="no"
+  VERB="no"
+  echo_default
+}
+
+function install_script() {
+lxc-attach -n "$CTID" -- bash << 'EOF'
+msg_info() { echo -e "\033[38;5;2m[INFO]\033[0m $1"; }
+msg_ok() { echo -e "\033[38;5;2m[✔️ ]\033[0m $1"; }
+msg_error() { echo -e "\033[38;5;1m[ERROR]\033[0m $1"; }
 
 msg_info "Installing Docker Engine & Compose"
-$STD apt-get update
-$STD apt-get install -y ca-certificates curl gnupg
+apt-get update
+apt-get install -y ca-certificates curl gnupg
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
 $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
-$STD apt-get update
-$STD apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker >/dev/null 2>&1
 msg_ok "Docker Installed"
 
 FRONTEND_PORT=4333
 BACKEND_PORT=7333
+IP=$(hostname -I | awk '{print $1}')
 
-msg_info "Deploying ${APP} (frontend:${FRONTEND_PORT} backend:${BACKEND_PORT})"
+msg_info "Deploying IPTVnator (frontend:${FRONTEND_PORT} backend:${BACKEND_PORT})"
 mkdir -p /opt/iptvnator
-cat > /opt/iptvnator/compose.yml <<EOF
+cat > /opt/iptvnator/compose.yml << COMPOSE_EOF
 services:
   backend:
     image: 4gray/iptvnator-backend:latest
@@ -78,15 +109,17 @@ services:
       - "${FRONTEND_PORT}:80"
     environment:
       - BACKEND_URL=http://${IP}:${BACKEND_PORT}
-EOF
+COMPOSE_EOF
 
 docker compose -f /opt/iptvnator/compose.yml pull
 docker compose -f /opt/iptvnator/compose.yml up -d
-msg_ok "${APP} stack is up"
+msg_ok "IPTVnator stack is up"
 
-msg_ok "Completed Successfully!\n"
-echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
-echo -e "${INFO}${YW} Access it using the following URL:${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:${FRONTEND_PORT}${CL}"
-echo -e "${INFO}${YW} Backend endpoint (for reference):${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:${BACKEND_PORT}${CL}"
+msg_ok "Completed Successfully!"
+echo -e "\033[38;5;2mIPTVnator setup has been successfully initialized!\033[0m"
+echo -e "\033[33m Access it using the following URL:\033[0m"
+echo -e "\033[1mhttp://${IP}:${FRONTEND_PORT}\033[0m"
+echo -e "\033[33m Backend endpoint (for reference):\033[0m"
+echo -e "\033[1mhttp://${IP}:${BACKEND_PORT}\033[0m"
+EOF
+}
