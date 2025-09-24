@@ -8,8 +8,8 @@ source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxV
 APP="IPTVnator"
 var_tags="${var_tags:-media;iptv;player}"
 var_cpu="${var_cpu:-1}"
-var_ram="${var_ram:-512}"
-var_disk="${var_disk:-4}"
+var_ram="${var_ram:-2048}"     # 2 GB per defecte
+var_disk="${var_disk:-15}"     # 15 GB per defecte
 var_os="${var_os:-debian}"
 var_version="${var_version:-12}"
 var_unprivileged="${var_unprivileged:-1}"
@@ -41,7 +41,7 @@ function update_script() {
 
 start
 build_container
-# (NO description aquí, per evitar el 404)
+# NO description (evitem 404 a ${var_install}.sh)
 
 msg_info "Installing Docker Engine & Compose"
 $STD apt-get update
