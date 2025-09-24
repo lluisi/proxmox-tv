@@ -87,8 +87,9 @@ TEMPLATE=""
 # Try to find local template first
 LOCAL_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | head -n1)
 if [ -n "$LOCAL_TEMPLATE" ]; then
-    # Extract just the filename from the full path
-    TEMPLATE=$(echo "$LOCAL_TEMPLATE" | sed "s|^${TEMPLATE_STORAGE}:vztmpl/||")
+    # Extract just the filename - pveam list returns format: STORAGE:vztmpl/FILENAME
+    # We need just FILENAME for pct create
+    TEMPLATE=$(echo "$LOCAL_TEMPLATE" | rev | cut -d'/' -f1 | rev)
     msg_ok "Found local template: $TEMPLATE"
 else
     # Find available template to download
@@ -135,8 +136,9 @@ else
         msg_error "Failed to download template. Please check your network and storage configuration."
     fi
 
-    # Extract just the filename from the full path
-    TEMPLATE=$(echo "$FULL_TEMPLATE" | sed "s|^${TEMPLATE_STORAGE}:vztmpl/||")
+    # Extract just the filename - pveam list returns format: STORAGE:vztmpl/FILENAME
+    # We need just FILENAME for pct create
+    TEMPLATE=$(echo "$FULL_TEMPLATE" | rev | cut -d'/' -f1 | rev)
     msg_ok "Template ready: $TEMPLATE"
 fi
 
