@@ -41,27 +41,25 @@ function update_script() {
 
 start
 build_container
-description
+# (NO description aquí, per evitar el 404)
 
-# ---------- Post-Create Configuration ----------
 msg_info "Installing Docker Engine & Compose"
 $STD apt-get update
 $STD apt-get install -y ca-certificates curl gnupg
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-  $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+$(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
 $STD apt-get update
 $STD apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable --now docker >/dev/null 2>&1
 msg_ok "Docker Installed"
 
-# ---------- App Deploy (Docker Compose) ----------
 FRONTEND_PORT=4333
 BACKEND_PORT=7333
 
+msg_info "Deploying ${APP} (frontend:${FRONTEND_PORT} backend:${BACKEND_PORT})"
 mkdir -p /opt/iptvnator
 cat > /opt/iptvnator/compose.yml <<EOF
 services:
@@ -82,12 +80,10 @@ services:
       - BACKEND_URL=http://${IP}:${BACKEND_PORT}
 EOF
 
-msg_info "Pulling images and starting ${APP}"
 docker compose -f /opt/iptvnator/compose.yml pull
 docker compose -f /opt/iptvnator/compose.yml up -d
 msg_ok "${APP} stack is up"
 
-# ---------- Finish ----------
 msg_ok "Completed Successfully!\n"
 echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
 echo -e "${INFO}${YW} Access it using the following URL:${CL}"
