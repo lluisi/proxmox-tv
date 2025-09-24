@@ -85,9 +85,10 @@ msg_info "Checking for Debian 12 templates..."
 TEMPLATE=""
 
 # Try to find local template first
-LOCAL_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $1}' | head -n1)
+LOCAL_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | head -n1)
 if [ -n "$LOCAL_TEMPLATE" ]; then
-    TEMPLATE="$LOCAL_TEMPLATE"
+    # Extract just the filename from the full path
+    TEMPLATE=$(echo "$LOCAL_TEMPLATE" | sed "s|^${TEMPLATE_STORAGE}:vztmpl/||")
     msg_ok "Found local template: $TEMPLATE"
 else
     # Find available template to download
@@ -128,12 +129,14 @@ else
         fi
     fi
 
-    # Verify download
-    TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $1}' | head -n1)
-    if [ -z "$TEMPLATE" ]; then
+    # Verify download and get just the filename
+    FULL_TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | head -n1)
+    if [ -z "$FULL_TEMPLATE" ]; then
         msg_error "Failed to download template. Please check your network and storage configuration."
     fi
 
+    # Extract just the filename from the full path
+    TEMPLATE=$(echo "$FULL_TEMPLATE" | sed "s|^${TEMPLATE_STORAGE}:vztmpl/||")
     msg_ok "Template ready: $TEMPLATE"
 fi
 
