@@ -40,48 +40,14 @@ function update_script() {
 }
 
 start
-description
 
-function default_settings() {
-  CT_TYPE="1"
-  PW=""
-  CT_ID=$NEXTID
-  HN=$NSAPP
-  DISK_SIZE="$var_disk"
-  CORE_COUNT="$var_cpu"
-  RAM_SIZE="$var_ram"
-  BRG="vmbr0"
-  NET="dhcp"
-  GATE=""
-  APT_CACHER=""
-  APT_CACHER_IP=""
-  DISABLEIP6="no"
-  MTU=""
-  SD=""
-  NS=""
-  MAC=""
-  VLAN=""
-  SSH="no"
-  VERB="no"
-  echo_default
-}
-
+# Override build_container function to use our custom install script
+unset -f build_container
 function build_container() {
-  show_checkmark "LXC Build"
-  if pct status $CTID &>/dev/null; then
-    pct destroy $CTID
-  fi
-
-  DISK_REF="$DISK_SIZE"
-  if [ "$DISK_REF" == "" ]; then
-    DISK_SIZE="2"
-    DISK_REF="2G"
-  else
-    DISK_REF="${DISK_SIZE}G"
-  fi
+  if [ "$VERB" == "yes" ]; then set -x; fi
 
   if [ "$CT_TYPE" == "1" ]; then
-    FEATURES="nesting=1,keyctl=1"
+    FEATURES="keyctl=1,nesting=1"
   else
     FEATURES="nesting=1"
   fi
@@ -89,80 +55,62 @@ function build_container() {
   TEMP_DIR=$(mktemp -d)
   pushd $TEMP_DIR >/dev/null
 
-  export CTID CT_TYPE PW CT_TEMPLATE DISK_SIZE CORE_COUNT RAM_SIZE BRG NET GATE APT_CACHER APT_CACHER_IP DISABLEIP6 MTU SD NS MAC VLAN SSH
-  export FEATURES HN DISK_REF
+  # Export functions file path for the install script
+  if [[ "$var_os" == "alpine" ]]; then
+    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/alpine-install.func)"
+  else
+    export FUNCTIONS_FILE_PATH="$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/install.func)"
+  fi
 
+  # Export required variables
+  export tz
+  if [[ "$var_os" == "ubuntu" ]]; then
+    export ST="sudo"
+  fi
+  export DISABLEIPV6="$DISABLEIP6"
+  export APPLICATION="$APP"
+  export app="$NSAPP"
+  export PASSWORD="$PW"
+  export VERBOSE="$VERB"
+  export SSH_ROOT="${SSH}"
+  export CTID="$CT_ID"
+  export CTTYPE="$CT_TYPE"
+  export PCT_OSTYPE="$var_os"
+  export PCT_OSVERSION="$var_version"
+  export PCT_DISK_SIZE="$DISK_SIZE"
+  export PCT_OPTIONS="
+    -features $FEATURES
+    -hostname $HN
+    ${SD:+-description "$SD"}
+    ${NS:+-nameserver "$NS"}
+    ${BRIDGE:+-net0 name=eth0,bridge="$BRIDGE"${VLAN:+,tag="$VLAN"}${MAC:+,hwaddr="$MAC"},ip=$NET${GATE:+,gw="$GATE"}${MTU:+,mtu="$MTU"}}
+    ${NETSNIFF:+-net1 name=eth1,bridge="$NETSNIFF",ip=$NETIP,mtu="$NETMTU"}
+    -onboot 1
+    -cores $CORE_COUNT
+    -memory $RAM_SIZE
+    -unprivileged $CT_TYPE
+    ${PW:+-password $PW}
+    ${MOUNT:+-mp0 "$MOUNT,mp=/mnt/host"}
+  "
+
+  # Create LXC container
+  msg_info "Creating LXC Container"
   bash -c "$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" || exit
+  msg_ok "LXC Container Created"
 
-  IP=$(pct exec $CTID ip a s dev eth0 | awk '/inet / {print $2}' | cut -d/ -f1)
-  pct set $CTID -description "# ${APP}
+  # Install IPTVnator using our custom install script
+  msg_info "Installing ${APP}"
+  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/lluisi/proxmox-tv/main/iptvnator-install.sh)" || exit
+  msg_ok "${APP} Installed"
 
-  ${APP} is installed and ready to use.
-
-  **Default Network Configuration**
-
-  - **IP Address:** ${IP}
-  - **Username:** N/A
-  - **Password:** N/A"
   popd >/dev/null
   rm -rf $TEMP_DIR
-
-  # Custom installation instead of calling external script
-  lxc-attach -n "$CTID" -- bash << 'EOF'
-msg_info() { echo -e "\033[38;5;2m[INFO]\033[0m $1"; }
-msg_ok() { echo -e "\033[38;5;2m[✔️ ]\033[0m $1"; }
-msg_error() { echo -e "\033[38;5;1m[ERROR]\033[0m $1"; }
-
-msg_info "Installing Docker Engine & Compose"
-apt-get update
-apt-get install -y ca-certificates curl gnupg
-install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-chmod a+r /etc/apt/keyrings/docker.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-$(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable --now docker >/dev/null 2>&1
-msg_ok "Docker Installed"
-
-FRONTEND_PORT=4333
-BACKEND_PORT=7333
-IP=$(hostname -I | awk '{print $1}')
-
-msg_info "Deploying IPTVnator (frontend:${FRONTEND_PORT} backend:${BACKEND_PORT})"
-mkdir -p /opt/iptvnator
-cat > /opt/iptvnator/compose.yml << COMPOSE_EOF
-services:
-  backend:
-    image: 4gray/iptvnator-backend:latest
-    restart: unless-stopped
-    ports:
-      - "${BACKEND_PORT}:3000"
-    environment:
-      - CLIENT_URL=http://${IP}:${FRONTEND_PORT}
-
-  frontend:
-    image: 4gray/iptvnator:latest
-    restart: unless-stopped
-    ports:
-      - "${FRONTEND_PORT}:80"
-    environment:
-      - BACKEND_URL=http://${IP}:${BACKEND_PORT}
-COMPOSE_EOF
-
-docker compose -f /opt/iptvnator/compose.yml pull
-docker compose -f /opt/iptvnator/compose.yml up -d
-msg_ok "IPTVnator stack is up"
-
-msg_ok "Completed Successfully!"
-echo -e "\033[38;5;2mIPTVnator setup has been successfully initialized!\033[0m"
-echo -e "\033[33m Access it using the following URL:\033[0m"
-echo -e "\033[1mhttp://${IP}:${FRONTEND_PORT}\033[0m"
-echo -e "\033[33m Backend endpoint (for reference):\033[0m"
-echo -e "\033[1mhttp://${IP}:${BACKEND_PORT}\033[0m"
-EOF
 }
 
-default_settings
-build_container
+description
+
+msg_ok "Completed Successfully!\n"
+echo -e "${APP} has been installed successfully!"
+echo -e ""
+echo -e "Access the frontend at: \033[1;32mhttp://<IP>:4333\033[0m"
+echo -e "Backend endpoint: \033[1;32mhttp://<IP>:7333\033[0m"
