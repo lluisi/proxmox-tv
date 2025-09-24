@@ -73,20 +73,45 @@ if [ -n "$LOCAL_TEMPLATE" ]; then
 else
     # Find available template to download
     msg_info "Searching for Debian 12 template to download..."
-    AVAILABLE_TEMPLATE=$(pveam available | grep -E "debian-12.*standard.*\.tar\.(gz|zst|xz)" | awk '{print $2}' | head -n1)
 
-    if [ -z "$AVAILABLE_TEMPLATE" ]; then
-        # Try without 'standard' in name
-        AVAILABLE_TEMPLATE=$(pveam available | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $2}' | head -n1)
+    # First try to find the standard Debian 12 template from system section
+    TEMPLATE_LINE=$(pveam available | grep -E "system.*debian-12-standard.*\.tar\.(gz|zst|xz)" | head -n1)
+
+    if [ -z "$TEMPLATE_LINE" ]; then
+        # Try any debian-12 standard template
+        TEMPLATE_LINE=$(pveam available | grep -E "debian-12-standard.*\.tar\.(gz|zst|xz)" | head -n1)
     fi
 
-    if [ -z "$AVAILABLE_TEMPLATE" ]; then
-        msg_error "No Debian 12 template found. Please download one manually using: pveam download $STORAGE <template-name>"
+    if [ -z "$TEMPLATE_LINE" ]; then
+        # Fallback to any debian-12 template
+        TEMPLATE_LINE=$(pveam available | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | head -n1)
     fi
 
-    msg_info "Downloading template: $AVAILABLE_TEMPLATE"
-    pveam download $STORAGE "$AVAILABLE_TEMPLATE"
-    TEMPLATE="$AVAILABLE_TEMPLATE"
+    if [ -z "$TEMPLATE_LINE" ]; then
+        msg_error "No Debian 12 template found. Please download one manually using: pveam download $STORAGE <section>/<template-name>"
+    fi
+
+    # Extract section and template name
+    SECTION=$(echo "$TEMPLATE_LINE" | awk '{print $1}')
+    TEMPLATE_NAME=$(echo "$TEMPLATE_LINE" | awk '{print $2}')
+
+    if [ "$SECTION" = "system" ]; then
+        # For system section, use the template directly
+        DOWNLOAD_NAME="$TEMPLATE_NAME"
+    else
+        # For other sections, might need section prefix
+        DOWNLOAD_NAME="$SECTION/$TEMPLATE_NAME"
+    fi
+
+    msg_info "Downloading template: $TEMPLATE_NAME from section: $SECTION"
+
+    # Try download without section first (most common)
+    if ! pveam download $STORAGE "$TEMPLATE_NAME" 2>/dev/null; then
+        # If that fails, try with section prefix
+        pveam download $STORAGE "$DOWNLOAD_NAME"
+    fi
+
+    TEMPLATE="$TEMPLATE_NAME"
     msg_ok "Template downloaded: $TEMPLATE"
 fi
 
