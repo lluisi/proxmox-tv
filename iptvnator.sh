@@ -8,8 +8,8 @@ source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxV
 APP="IPTVnator"
 var_tags="${var_tags:-media;iptv;player}"
 var_cpu="${var_cpu:-1}"
-var_ram="${var_ram:-2048}"     # 2 GB per defecte
-var_disk="${var_disk:-15}"     # 15 GB per defecte
+var_ram="${var_ram:-2048}"
+var_disk="${var_disk:-15}"
 var_os="${var_os:-debian}"
 var_version="${var_version:-12}"
 var_unprivileged="${var_unprivileged:-1}"
@@ -40,7 +40,6 @@ function update_script() {
 }
 
 start
-build_container
 description
 
 function default_settings() {
@@ -67,8 +66,49 @@ function default_settings() {
   echo_default
 }
 
-function install_script() {
-lxc-attach -n "$CTID" -- bash << 'EOF'
+function build_container() {
+  show_checkmark "LXC Build"
+  if pct status $CTID &>/dev/null; then
+    pct destroy $CTID
+  fi
+
+  DISK_REF="$DISK_SIZE"
+  if [ "$DISK_REF" == "" ]; then
+    DISK_SIZE="2"
+    DISK_REF="2G"
+  else
+    DISK_REF="${DISK_SIZE}G"
+  fi
+
+  if [ "$CT_TYPE" == "1" ]; then
+    FEATURES="nesting=1,keyctl=1"
+  else
+    FEATURES="nesting=1"
+  fi
+
+  TEMP_DIR=$(mktemp -d)
+  pushd $TEMP_DIR >/dev/null
+
+  export CTID CT_TYPE PW CT_TEMPLATE DISK_SIZE CORE_COUNT RAM_SIZE BRG NET GATE APT_CACHER APT_CACHER_IP DISABLEIP6 MTU SD NS MAC VLAN SSH
+  export FEATURES HN DISK_REF
+
+  bash -c "$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" || exit
+
+  IP=$(pct exec $CTID ip a s dev eth0 | awk '/inet / {print $2}' | cut -d/ -f1)
+  pct set $CTID -description "# ${APP}
+
+  ${APP} is installed and ready to use.
+
+  **Default Network Configuration**
+
+  - **IP Address:** ${IP}
+  - **Username:** N/A
+  - **Password:** N/A"
+  popd >/dev/null
+  rm -rf $TEMP_DIR
+
+  # Custom installation instead of calling external script
+  lxc-attach -n "$CTID" -- bash << 'EOF'
 msg_info() { echo -e "\033[38;5;2m[INFO]\033[0m $1"; }
 msg_ok() { echo -e "\033[38;5;2m[✔️ ]\033[0m $1"; }
 msg_error() { echo -e "\033[38;5;1m[ERROR]\033[0m $1"; }
@@ -123,3 +163,6 @@ echo -e "\033[33m Backend endpoint (for reference):\033[0m"
 echo -e "\033[1mhttp://${IP}:${BACKEND_PORT}\033[0m"
 EOF
 }
+
+default_settings
+build_container
