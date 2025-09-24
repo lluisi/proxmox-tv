@@ -20,7 +20,6 @@ msg_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 # Default settings
 APP="IPTVnator"
 CTID="${1:-$(pvesh get /cluster/nextid)}"
-TEMPLATE="debian-12-standard_12.7-1_amd64.tar.zst"
 DISK_SIZE="15"
 CPU_CORES="1"
 RAM_SIZE="2048"
@@ -58,13 +57,38 @@ if [ -z "$STORAGE" ]; then
 fi
 msg_ok "Using storage: $STORAGE"
 
-# Download template if needed
-msg_info "Checking template..."
-if ! pveam list $STORAGE | grep -q "$TEMPLATE"; then
-    msg_info "Downloading Debian 12 template..."
-    pveam download $STORAGE $TEMPLATE
+# Update template list
+msg_info "Updating template list..."
+pveam update >/dev/null 2>&1
+
+# Find available Debian 12 template
+msg_info "Checking for Debian 12 templates..."
+TEMPLATE=""
+
+# Try to find local template first
+LOCAL_TEMPLATE=$(pveam list $STORAGE 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $1}' | head -n1)
+if [ -n "$LOCAL_TEMPLATE" ]; then
+    TEMPLATE="$LOCAL_TEMPLATE"
+    msg_ok "Found local template: $TEMPLATE"
+else
+    # Find available template to download
+    msg_info "Searching for Debian 12 template to download..."
+    AVAILABLE_TEMPLATE=$(pveam available | grep -E "debian-12.*standard.*\.tar\.(gz|zst|xz)" | awk '{print $2}' | head -n1)
+
+    if [ -z "$AVAILABLE_TEMPLATE" ]; then
+        # Try without 'standard' in name
+        AVAILABLE_TEMPLATE=$(pveam available | grep -E "debian-12.*\.tar\.(gz|zst|xz)" | awk '{print $2}' | head -n1)
+    fi
+
+    if [ -z "$AVAILABLE_TEMPLATE" ]; then
+        msg_error "No Debian 12 template found. Please download one manually using: pveam download $STORAGE <template-name>"
+    fi
+
+    msg_info "Downloading template: $AVAILABLE_TEMPLATE"
+    pveam download $STORAGE "$AVAILABLE_TEMPLATE"
+    TEMPLATE="$AVAILABLE_TEMPLATE"
+    msg_ok "Template downloaded: $TEMPLATE"
 fi
-msg_ok "Template ready"
 
 # Create container
 msg_info "Creating LXC container..."
@@ -109,19 +133,28 @@ msg_ok "Container IP: $IP"
 
 # Update container
 msg_info "Updating container OS..."
-pct exec $CTID -- bash -c "apt-get update && apt-get upgrade -y"
+pct exec $CTID -- bash -c "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y"
 
 # Install Docker
-msg_info "Installing Docker..."
+msg_info "Installing Docker dependencies..."
 pct exec $CTID -- bash -c "
-apt-get install -y ca-certificates curl gnupg
+DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl gnupg lsb-release
+"
+
+msg_info "Adding Docker repository..."
+pct exec $CTID -- bash -c "
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 chmod a+r /etc/apt/keyrings/docker.gpg
-echo 'deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable' > /etc/apt/sources.list.d/docker.list
+echo 'deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \$(lsb_release -cs) stable' > /etc/apt/sources.list.d/docker.list
+"
+
+msg_info "Installing Docker Engine..."
+pct exec $CTID -- bash -c "
 apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-systemctl enable --now docker
+DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable docker
+systemctl start docker
 "
 msg_ok "Docker installed"
 
@@ -151,8 +184,12 @@ EOF
 msg_ok "IPTVnator configured"
 
 # Pull and start containers
+msg_info "Pulling Docker images (this may take a while)..."
+pct exec $CTID -- bash -c "cd /opt/iptvnator && docker compose pull"
+msg_ok "Docker images downloaded"
+
 msg_info "Starting IPTVnator services..."
-pct exec $CTID -- bash -c "cd /opt/iptvnator && docker compose pull && docker compose up -d"
+pct exec $CTID -- bash -c "cd /opt/iptvnator && docker compose up -d"
 msg_ok "IPTVnator services started"
 
 # Set description
