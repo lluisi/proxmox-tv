@@ -55,7 +55,8 @@ TEMPLATE=""
 # Check local templates first
 LOCAL_TEMPLATES=$(pveam list local 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" || true)
 if [ -n "$LOCAL_TEMPLATES" ]; then
-    TEMPLATE=$(echo "$LOCAL_TEMPLATES" | head -n1 | rev | cut -d'/' -f1 | rev)
+    # Extract just the template filename, removing size info and extra spaces
+    TEMPLATE=$(echo "$LOCAL_TEMPLATES" | head -n1 | awk '{print $1}' | rev | cut -d'/' -f1 | rev)
     STORAGE="local"
     msg_ok "Found local template: $TEMPLATE"
 else
@@ -63,7 +64,8 @@ else
     for storage in $(pvesm status -content vztmpl | awk 'NR>1 {print $1}'); do
         TEMPLATES=$(pveam list $storage 2>/dev/null | grep -E "debian-12.*\.tar\.(gz|zst|xz)" || true)
         if [ -n "$TEMPLATES" ]; then
-            TEMPLATE=$(echo "$TEMPLATES" | head -n1 | rev | cut -d'/' -f1 | rev)
+            # Extract just the template filename, removing size info and extra spaces
+            TEMPLATE=$(echo "$TEMPLATES" | head -n1 | awk '{print $1}' | rev | cut -d'/' -f1 | rev)
             STORAGE="$storage"
             msg_ok "Found template in $storage: $TEMPLATE"
             break
