@@ -40,10 +40,14 @@ function update_script() {
 }
 
 start
+description
 
-# Override build_container function to use our custom install script
+# Store original build_container function and override
+original_build_container=$(declare -f build_container)
 unset -f build_container
+
 function build_container() {
+  # Call most of the original build_container but replace the install script execution
   if [ "$VERB" == "yes" ]; then set -x; fi
 
   if [ "$CT_TYPE" == "1" ]; then
@@ -98,19 +102,50 @@ function build_container() {
   bash -c "$(wget -qLO - https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/create_lxc.sh)" || exit
   msg_ok "LXC Container Created"
 
+  # Check if container is running
+  msg_info "Starting LXC Container"
+  pct start "$CT_ID"
+  sleep 5
+
+  # Wait for network
+  msg_info "Waiting for container network"
+  max_attempts=30
+  attempt=0
+  while [ $attempt -lt $max_attempts ]; do
+    if pct exec "$CT_ID" -- ip a s dev eth0 2>/dev/null | grep -q inet; then
+      break
+    fi
+    sleep 2
+    ((attempt++))
+  done
+  msg_ok "Network Ready"
+
+  # Get IP address
+  IP=$(pct exec "$CT_ID" ip a s dev eth0 | awk '/inet / {print $2}' | cut -d/ -f1)
+
+  # Configure container description
+  pct set "$CT_ID" -description "# ${APP} LXC
+### https://github.com/4gray/iptvnator
+
+Frontend: http://${IP}:4333
+Backend: http://${IP}:7333"
+
   # Install IPTVnator using our custom install script
   msg_info "Installing ${APP}"
-  lxc-attach -n "$CTID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/lluisi/proxmox-tv/main/iptvnator-install.sh)" || exit
+  pct exec "$CT_ID" -- bash -c "$(curl -fsSL https://raw.githubusercontent.com/lluisi/proxmox-tv/main/iptvnator-install.sh)" || exit
   msg_ok "${APP} Installed"
 
   popd >/dev/null
   rm -rf $TEMP_DIR
+
+  # Final success message with IP
+  msg_ok "Installation Complete!"
+  echo ""
+  msg_info "IPTVnator Access Information:"
+  echo -e "Frontend: ${BGN}http://${IP}:4333${CL}"
+  echo -e "Backend:  ${BGN}http://${IP}:7333${CL}"
+  echo ""
 }
 
-description
-
-msg_ok "Completed Successfully!\n"
-echo -e "${APP} has been installed successfully!"
-echo -e ""
-echo -e "Access the frontend at: \033[1;32mhttp://<IP>:4333\033[0m"
-echo -e "Backend endpoint: \033[1;32mhttp://<IP>:7333\033[0m"
+# Now call build_container
+build_container
